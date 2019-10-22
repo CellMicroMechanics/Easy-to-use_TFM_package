@@ -9,9 +9,9 @@ data set that can be used for first tests.
 
 The package contains two methods: 
 
-1. regularized Fourier transform traction cytometry 
+1. Regularized Fourier Transform Traction Cytometry 
 
-2. bayesian Fourier transform traction cytometry, which is an improved method for
+2. Bayesian Fourier Transform Traction Cytometry, which is an improved method for
 automatic, robust traction calculation.
 
 See the User Manual for details on program usage. 
