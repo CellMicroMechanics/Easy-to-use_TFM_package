@@ -1,8 +1,4 @@
 # Easy-to-use_TFM_package
-<head>
-<meta name="google-site-verification" content="7mC_bh4mWmHkORFslSsj78ccNI59DGGfc67i1LFx4ic" />
-</head>
-
 
 This Matlab package is a user-friendly tool for calculation of traction forces 
 in traction force microscopy (TFM) experiments.  
