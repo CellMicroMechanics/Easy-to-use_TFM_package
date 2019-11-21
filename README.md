@@ -14,7 +14,7 @@ The package contains two methods:
 2. Bayesian Fourier Transform Traction Cytometry, which is an improved method for
 automatic, robust traction calculation.
 
-See the User Manual for details on program usage. 
+See the User Manual and Refs. (a,b) for details. 
 
 
 Yunfei Huang and Benedikt Sabass, 2019.
