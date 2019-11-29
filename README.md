@@ -4,7 +4,7 @@ This Matlab package is a user-friendly tool for calculation of traction forces
 in traction force microscopy (TFM) experiments.  
 
 After downloading, the program can be directly started from the Matlab command line
-by entering "TF_reconstruction". The folder 'test_data' contains an exemplary (synthetic)
+by entering "TF_reconstruction". The folder ''test_data'' contains an exemplary synthetic
 data set that can be used for first tests.
 
 The package contains two methods: 
