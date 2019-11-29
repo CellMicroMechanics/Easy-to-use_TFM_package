@@ -34,7 +34,7 @@ function varargout = Bayesian_regularization(varargin)
 
 % Edit the above text to modify the response to help Bayesian_regularization
 
-% Last Modified by GUIDE v2.5 16-Aug-2019 08:22:39
+% Last Modified by GUIDE v2.5 26-Nov-2019 22:02:00
 
 % Begin initialization code - DO NOT EDIT
 
@@ -59,48 +59,56 @@ end
 
 % --- Executes just before Bayesian_regularization is made visible.
 function Bayesian_regularization_OpeningFcn(hObject, eventdata, handles, varargin)
-    
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%   
+%%% Setting initial parameters
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%     
+  
 handles.data = varargin{1};
 
+%set figure units
+set(handles.figure1, 'units', 'normalized');
+
+%get image file names and display them in the drop down menu
 dir_struct = vertcat(dir(fullfile(handles.data.imagedir_name,'*.tif*')),dir(fullfile(handles.data.imagedir_name,'*.jpg*')));
 [sorted_names,sorted_index] = sortrows({dir_struct.name}');
-set(handles.preview_image,'String',sorted_names,'Value',1)
+if ~isempty(sorted_names)
+    set(handles.preview_image,'String',sorted_names,'Value',1)
+else
+    set(handles.preview_image,'String','No image available','Value',1)
+end
+%get dataset numbers
 for i = 1:length(handles.data.displacement)
     hilf_cell{i,1} = num2str(i);
 end
 set(handles.preview_frame,'String',hilf_cell,'Value',1);
 
-max_eck(1:2) = [max(handles.data.displacement(1).pos(:,1)), max(handles.data.displacement(1).pos(:,2))];
-min_eck(1:2) = [min(handles.data.displacement(1).pos(:,1)), min(handles.data.displacement(1).pos(:,2))];
-
-for i = 1:length(handles.data.noise)
-    hilf_cell_noise{i,1} = num2str(i);
+% use the first nonempty dataset to calculate a grid spacing that is
+% suggested in the menu
+data_nonempty =  handles.data.data_nonempty;
+first_index = find(data_nonempty(:,1),1);
+if ~isempty(first_index)
+    first_useful_frame = data_nonempty(first_index,2);
+else
+    errordlg('The dataset only contains empty or too small dispacement fields.','Error');
 end
-
-handles.data.meshsize = round(sqrt((max_eck(1)-min_eck(1))*(max_eck(2)-min_eck(2))/size(handles.data.displacement(1).pos,1)));
+max_eck(1:2) = [max(handles.data.displacement(first_useful_frame).pos(:,1)), max(handles.data.displacement(first_useful_frame).pos(:,2))];
+min_eck(1:2) = [min(handles.data.displacement(first_useful_frame).pos(:,1)), min(handles.data.displacement(first_useful_frame).pos(:,2))];
+handles.data.meshsize = round(sqrt((max_eck(1)-min_eck(1))*(max_eck(2)-min_eck(2))/size(handles.data.displacement(first_useful_frame).pos,1)));
 set(handles.meshsize_win,'String',num2str(handles.data.meshsize));
 
-set(handles.figure1, 'units', 'normalized');
-
-handles.data.regparam = 0.2/handles.data.young;
-
-handles.data.pos = 0;
+%initialize variables
+handles.data.pos = [];
+handles.data.bild = [];
+handles.data.selected_region_with_noise_xy = [];
+handles.data.selected_region_with_noise_frame = [];
 handles.output = hObject;
-
-handles.data.leftalpha= 1;
-handles.data.rightalpha = 1e7;
-handles.data.stepalpha = 1;
-handles.data.iterationnumber = 200;
 
 % Update handles structure
 guidata(hObject, handles);
 
 
-
-
 % UIWAIT makes Bayesian_regularization wait for user response (see UIRESUME)
 % uiwait(handles.figure1);
-
 
 % --- Outputs from this function are returned to the command line.
 function varargout = Bayesian_regularization_OutputFcn(hObject, eventdata, handles)
@@ -121,188 +129,260 @@ return;
 
 % --- Executes on button press in analyze.
 function analyze_Callback(hObject, eventdata, handles)
-handles.data.zdepth = 0.0; 
-grid_mat = [];
-framenumber = length(handles.data.displacement);
-
-%%% scale the Young modulus to 1
-ne = handles.data.young;
-young= 1;
-
-reg_parameter=[];
-for frame = 1:framenumber
-    if isempty(handles.data.displacement(frame).pos) || isempty(handles.data.displacement(frame).vec)||...
-       length(handles.data.displacement(frame).pos) < 2
-         disp(['There dataset of frame ', num2str(frame),' was not valid. Skipping this frame!']);
-         continue;
-    end
-    
-  [grid_mat,u, i_max,j_max] = interp_vec2grid(handles.data.displacement(frame).pos+...
-              handles.data.displacement(frame).vec, handles.data.displacement(frame).vec,handles.data.meshsize);
-  kx_vec = 2*pi/i_max/handles.data.meshsize.*[0:(i_max/2-1) (-i_max/2:-1)];
-  ky_vec = 2*pi/j_max/handles.data.meshsize.*[0:(j_max/2-1) (-j_max/2:-1)];
-  kx = repmat(kx_vec',1,j_max);
-  ky = repmat(ky_vec,i_max,1);
-    
-  kx(1,1) = 1;
-  ky(1,1) = 1;
-  k = sqrt(kx.^2+ky.^2);
-  
-  conf = 2.*(1+handles.data.poisson)./(young.*k.^3);
-  Ginv_xx = conf .* ((1-handles.data.poisson).*k.^2+handles.data.poisson.*ky.^2);
-  Ginv_xy = conf .* (-handles.data.poisson.*kx.*ky);
-  Ginv_yy = conf .* ((1-handles.data.poisson).*k.^2+handles.data.poisson.*kx.^2);
-
-  Ginv_xx(1,1) = 0;
-  Ginv_yy(1,1) = 0;
-  Ginv_xy(1,1) = 0;
-  
-  Ginv_xy(i_max/2+1,:) = 0;
-  Ginv_xy(:,j_max/2+1) = 0;
-
-  G1 = reshape(Ginv_xx,[1,i_max*j_max]);
-  G2 = reshape(Ginv_yy,[1,i_max*j_max]);
-  X1 = reshape([G1; G2], [], 1)';
-  
-  G3 = reshape(Ginv_xy,[1,i_max*j_max]);
-  G4 = zeros(1, i_max*j_max); 
-  X2 = reshape([G4; G3], [], 1)';
-  X3 = X2(1,2:end);
-   
-  X4 = diag(X1);
-  X5 = diag(X3,1);
-  X6 = diag(X3,-1);
-  X=X4+X5+X6;
- 
-  Ftu(:,:,1) = fft2(u(:,:,1));
-  Ftu(:,:,2) = fft2(u(:,:,2));
-
-  fux1=reshape(Ftu(:,:,1),i_max*j_max,1);
-  fuy1=reshape(Ftu(:,:,2),i_max*j_max,1);
-
-  fuu(1:2:size(fux1)*2,1) = fux1;
-  fuu(2:2:size(fuy1)*2,1) = fuy1;
-  
-  blah = get(handles.noiseway, 'SelectedObject');
-  noise_way=get(blah,'String');
-  
-  switch noise_way
-    case 'Noise from input file'
-
-        size_noise = size(handles.data.noise);
-        if  size_noise(2) ==1                      
-           errordlg('No noise from input file. Using manual noise selection','Error');
-           return;
-        end
-  
-        if  frame==1
-         using_noise = handles.data.noise(frame);          
-         haha = waitbar(0,'Please wait while data is being assembled..','WindowStyle','modal');
-        else 
-         using_noise = handles.data.noise(frame);
-        end
-    case 'Manual noise selection' 
         
-       if  frame==1
-
-        bild_dateien_1 = get(handles.preview_image,'string');
-        frame1 = get(handles.preview_frame,'value');
-        setappdata(0,'frame1', frame1 );
-        setappdata(0,'bild_dateien_1', bild_dateien_1 );
-        Select_noise(handles.data)
-        [xx,yy]=getline('closed');
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        %%% Performs Bayesian TFM calculations for the data sequence and save result
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
         
-       if isempty(xx) || isempty(yy)
-        errordlg('The selected noise is empty.','Error');
-        return;
-       end     
-        delete(Select_noise(handles.data));
-     
-        indata = inpolygon(handles.data.displacement(frame).pos(:,1),handles.data.displacement(frame).pos(:,2),xx,yy);
-        using_noise.pos = handles.data.displacement(frame).pos(indata,:);
-        using_noise.vec = handles.data.displacement(frame).vec(indata,:);
-     
-     haha = waitbar(0,'Please wait while data is being assembled..','WindowStyle','modal');
-     else
-         
-     using_noise.pos = handles.data.displacement(frame).pos(indata,:);
-     using_noise.vec = handles.data.displacement(frame).vec(indata,:);
-     
-     end
-      
-  end
-  
-   waitbar(frame/framenumber);
+        %%% IMPORTANT: for strain energy calculations, we crop the grid by
+        %Crop_rim_perc percent from all sides to avoid boundary effects. Change if desired
+        Crop_rim_perc = 15; %value between 0 [%] and 50 [%]  
+        
+        %With Bayesian TFM, we assume for simplicity z=0. This can be 
+        %changed, but functions need to be adapted
+        handles.data.zdepth = 0.0;
+        
+        %get all the data sets that contain nonempty displacement fields
+        framenumber = length(handles.data.displacement);
+        data_nonempty =  handles.data.data_nonempty;
+        indices = find(data_nonempty(:,1));
+        
+        %init
+        reg_parameter = [];          %regularization parameter
+        grid_mat = [];               %reguar grid
+        beta = zeros(framenumber,1); %inverse noise variance
+        
+        % Select source of noise data
+        blah = get(handles.noiseway, 'SelectedObject');
+        noise_way = get(blah,'Tag');
+        switch noise_way
+            case 'inputfile'
+                noise_from_inputfile = 1;
+                noise_framenumber = length(handles.data.noise);
+            otherwise
+                noise_from_inputfile = 0;
+        end
+        
+        %calculate the noise variance in the whole data sequence
+        for frame = 1:framenumber
+            if  ~data_nonempty(frame,1)  %%% skip if no displacement data available
+                continue;
+            end
+            
+            if frame == indices(1)   %see if we are dealing with the first frame
+                first_frame = 1;
+            else
+                first_frame = 0;
+            end
+                  
+            
+            if noise_from_inputfile %noise comes from input data
+               if ~isfield(handles.data,'noise') || isempty(handles.data.noise)
+                    %display error message if 'noise from input file'
+                    %was selected, but input does not contain noise
+                    %sample
+                    errordlg('The input file contains no noise data. Select noise sample manually.','Error');
+                    return;
+               else
+                   %check each frame length of noise
+                    size_noise_pos = size(handles.data.noise(frame).pos);
+                    size_noise_vec = size(handles.data.noise(frame).vec);            
+               end
+               if  first_frame %is this the first dataset?
+                    %search for first dataset containing noise data
+                    first_noise_frame_index = 0;
+                    frame2 = frame;
+                    while (first_noise_frame_index == 0) && (frame2 <= noise_framenumber)
+                        size_noise_vec1 = size(handles.data.noise(frame2).vec);
+                        %does the variable really contain enough data?
+                        if (size_noise_vec1(1) >= 1) && (size_noise_vec1(2) >= 2) && length(handles.data.noise(frame2).vec) > 2
+                            %This index is used to calculate noise variance
+                            %for frames that have no noise data
+                            first_noise_frame_index = frame2;
+                        end
+                        frame2 = frame2 +1;
+                    end
+                    if first_noise_frame_index==0
+                        %display error message if 'noise from input file'
+                        %was selected, but input does not contain noise
+                        %sample
+                        errordlg('The input file contains no noise data. Select noise sample manually.','Error');
+                        return;
+                    end
+                end
+                
+                if (frame > noise_framenumber) || size_noise_pos(1) < 1 || size_noise_pos(2) < 2 || size_noise_vec(1) < 1 || size_noise_vec(2) < 2
+                    disp(['NOTICE: No noise sample in dataset number ', num2str(frame),'. Using noise in dataset number ', num2str(first_noise_frame_index)]);
+                    current_noise_frame_index = first_noise_frame_index;
+                else
+                    current_noise_frame_index = frame;
+                end
+                
+                used_noise_sample = handles.data.noise(current_noise_frame_index).vec(:,1:2);
+                beta(frame) = 1/var(used_noise_sample(:));
+                
+            else  %noise comes from manually selected region
+                  if ~isempty(handles.data.selected_region_with_noise_xy) %Region of interest for noise has been specified
+                    
+                     %select the noise sample in the polygonal roi that was
+                     %manually chosen
+                     pxy     = handles.data.selected_region_with_noise_xy;
+                     indata  = inpolygon(handles.data.displacement(frame).pos(:,1),handles.data.displacement(frame).pos(:,2),pxy(:,1),pxy(:,2));
+                     if isempty(indata) ||(nnz(indata) <2)
+                        errordlg('In dataset no. ', num2str(frame),': The ROI for noise selection contains to few displacements.','Error');
+                        return;
+                     end
 
-  noise_u(1:2:size(using_noise.vec,1)*2,1) = using_noise.vec(:,1);
-  noise_u(2:2:size(using_noise.vec,1)*2,1) = using_noise.vec(:,2);
-  beta = 1/var(noise_u);
-  
-   
-  [L]= optimal_lambda_sequence(beta,fuu,Ftu(:,:,1),Ftu(:,:,2),...
-                          young,handles.data.poisson,handles.data.meshsize,i_max, j_max,X);
+                     used_noise_sample = handles.data.displacement(frame).vec(indata,1:2);
+                     beta(frame) = 1/var(used_noise_sample(:));
+                    
+                else %Region of interest for noise is not yet determined. Must select Roi manually now.
+                    
+                        noise_frame = get(handles.preview_frame,'value');   %%frame for noise selection is the current one in the GUI.                       
+                        message = sprintf(['Choose a ROI containing noise in the current dataset no. ', num2str(noise_frame)]);
+                        uiwait(msgbox(message, 'Notice'));
+                        
+                        % check if data is provided
+                        if ~data_nonempty(noise_frame,1)                            
+                            errordlg('Can not select noise sample. The currently selected data set has too few displacements.','Error');
+                            return;
+                        end
+                        
 
-  handles.data.regparam=[];
-  handles.data.regparam = L;
-   
-   [TFM_results(frame).pos,TFM_results(frame).traction,TFM_results(frame).traction_magnitude,f] = ...
-                         reg_fourier_TFM(grid_mat,u,young,handles.data.poisson, handles.data.pix_durch_my,...
-                         handles.data.zdepth, handles.data.meshsize, i_max,j_max, L);
+                        bild_dateien_1 = get(handles.preview_image,'string');
+                        bild_datei_index_1 = get(handles.preview_image,'value');
 
-   TFM_results(frame).traction=ne*TFM_results(frame).traction;
-   TFM_results(frame).traction_magnitude=ne*TFM_results(frame).traction_magnitude;
-   
-   bnd = 6;
-   f = f.*ne;
-   TFM_results(frame).energy = 1/2*sum(sum(u(bnd:end-bnd+1,bnd:end-bnd+1,1).*f(bnd:end-bnd+1,bnd:end-bnd+1,1) +...
-         u(bnd:end-bnd+1,bnd:end-bnd+1,2).*f(bnd:end-bnd+1,bnd:end-bnd+1,2)))*(handles.data.meshsize)^2*...
-         handles.data.pix_durch_my^3/10^6; 
-     
-       
-    pu(:,1) = reshape(u(:,:,1),i_max*j_max,1);
-    pu(:,2) = reshape(u(:,:,2),i_max*j_max,1);
-    TFM_results(frame).displacement= pu; 
-    reg_parameter(end+1,1)=L;
-end
-
-TFM_settings.poisson = handles.data.poisson;
-TFM_settings.young = handles.data.young;
-TFM_settings.micrometer_per_pix = handles.data.pix_durch_my;
-TFM_settings.regularization_parameter = reg_parameter;
-TFM_settings.meshsize = handles.data.meshsize;
-TFM_settings.zdepth = handles.data.zdepth;
-
-TFM_settings.i_max = i_max;
-TFM_settings.j_max = j_max;
-
-reg_parameter=[];
-
- close(haha);
-
-[filepath,name,ext] = fileparts(handles.data.strain_noise_file_name); 
-handles.data.targetdir_name = filepath;                               
-
-savefile_name = fullfile(handles.data.targetdir_name,['Bay-FTTC_results_',datestr(now, 'dd-mm-yy'),'.mat']);
-if exist(savefile_name)
-    button = questdlg('The file exists already. Overwrite?','Error','Yes');
-    if strcmpi(button,'No') || strcmpi(button,'')
-            return;
-    end
-end
-
-save(savefile_name,'TFM_results','TFM_settings','-mat');
-
-clear XX;
-clear yy;
-
+                        % Transfer information to Select_noise.mat
+                        setappdata(0,'frame_1', noise_frame);
+                        setappdata(0,'bild_datei_index_1', bild_datei_index_1 );
+                        setappdata(0,'bild_dateien_1', bild_dateien_1 );
+                                                
+                        %choose the ROI with the mouse
+                        Select_noise(handles.data)
+                        try
+                            [xx,yy] = getline('closed');
+                        catch
+                            errordlg('The selected noise data is empty.','Error');
+                            return;
+                        end
+                        
+                        %check if ROI contains data
+                        if isempty(xx) || isempty(yy)
+                            errordlg('The selected noise data is empty.','Error');
+                            delete(Select_noise(handles.data));
+                            return;
+                        end
+                        indata = inpolygon(handles.data.displacement(noise_frame).pos(:,1),handles.data.displacement(noise_frame).pos(:,2),xx,yy);                        
+                        if (length(xx)<3) ||(nnz(indata) <2)
+                            errordlg('The selected area contains to few displacements.','Error');
+                            delete(Select_noise(handles.data));
+                            return;
+                        end
+                        
+                        delete(Select_noise(handles.data));
+                        
+                        %save the polygon to select noise in other frames
+                        handles.data.selected_region_with_noise_xy = [xx yy];
+                        handles.data.selected_region_with_noise_frame= noise_frame;
+                        
+                        %get the noise sample and calculate the variance
+                        used_noise_sample = handles.data.displacement(noise_frame).vec(indata,1:2);
+                        beta(frame) = 1/var(used_noise_sample(:));
+                        
+                   end
+            end
+        end
+               
+        E = 1;      %set Young modulus to 1 in calculations
+        E_rescale = handles.data.young; %Young modulus for final rescaling
+        s  =  handles.data.poisson; %Poisson's modulus
+        meshsize = handles.data.meshsize;
+        
+        haha = waitbar(0,'Please wait while data is being assembled..','WindowStyle','modal');
+        for frame = 1:framenumber
+            waitbar(frame/framenumber);
+            if  ~data_nonempty(frame,1)  %%% displacement data available?
+                continue;
+            end
+            
+            %calculate Green's function and fourier transformed
+            %displacement field
+            orig_pos = handles.data.displacement(frame).pos(:,1:2);
+            vec = handles.data.displacement(frame).vec(:,1:2);
+            [grid_mat,i_max,j_max, X,fuu,Ftux,Ftuy,u] = fourier_X_u(orig_pos,vec, meshsize, E, s,grid_mat);
+            
+            %%%Calculate the optimal regularization parameter
+            [L,~,~] = optimal_lambda(beta(frame),fuu,Ftux,Ftuy,...
+                E,s,handles.data.meshsize,i_max, j_max,X,1);
+            
+            %calculate traction forces
+            [TFM_results(frame).pos,TFM_results(frame).traction,TFM_results(frame).traction_magnitude,f_n_m,~,~] = ...
+                reg_fourier_TFM(Ftux,Ftuy,L,E,s, handles.data.meshsize,...
+                i_max,j_max, grid_mat,handles.data.pix_durch_my, handles.data.zdepth);
+            
+            %%% save TFM_results
+            TFM_results(frame).traction = E_rescale*TFM_results(frame).traction;
+            TFM_results(frame).traction_magnitude = E_rescale*TFM_results(frame).traction_magnitude;
+            
+            %calculate strain energy. Note that we crop the outer rim of the field by 'bnd' grid
+            %units to avoid edge effects
+            f_mat=E_rescale.*f_n_m;
+            bnd = floor(min(size(u(:,:,1)))*Crop_rim_perc/100+1);
+            TFM_results(frame).energy = 1/2*sum(sum(u(bnd:end-bnd+1,bnd:end-bnd+1,1).*f_mat(bnd:end-bnd+1,bnd:end-bnd+1,1) +...
+                u(bnd:end-bnd+1,bnd:end-bnd+1,2).*f_mat(bnd:end-bnd+1,bnd:end-bnd+1,2)))*(handles.data.meshsize)^2*...
+                handles.data.pix_durch_my^3/10^6;
+            
+            u_reshape(:,1) = reshape(u(:,:,1),i_max*j_max,1);
+            u_reshape(:,2) = reshape(u(:,:,2),i_max*j_max,1);
+            TFM_results(frame).displacement = u_reshape;
+            reg_parameter(frame,1) = L;
+        end
+        
+        %%% save TFM_settings
+        TFM_settings.poisson = handles.data.poisson;
+        TFM_settings.young = handles.data.young;
+        TFM_settings.micrometer_per_pix = handles.data.pix_durch_my;
+        TFM_settings.regularization_parameter = reg_parameter;
+        TFM_settings.meshsize = handles.data.meshsize;
+        TFM_settings.zdepth = handles.data.zdepth;
+        TFM_settings.i_max = i_max;
+        TFM_settings.j_max = j_max;
+        
+        %document the noise source in the saved settings
+        if noise_from_inputfile
+            TFM_settings.type_noise = ('Noise from input_file');  %% save type of noise
+        else
+            TFM_settings.type_noise = ['Region of interest for noise selected manually'];  %% save type of noise
+        end
+        
+        close(haha);
+        [filepath,name,ext] = fileparts(handles.data.strain_noise_file_name);
+        handles.data.targetdir_name = filepath;
+        
+        savefile_name = fullfile(handles.data.targetdir_name,['Bay-FTTC_results_',datestr(now, 'dd-mm-yy'),'.mat']);
+        if exist(savefile_name)
+            button = questdlg('The file exists already. Overwrite?','Error','Yes');
+            if strcmpi(button,'No') || strcmpi(button,'')
+                return;
+            end
+        end
+        
+        save(savefile_name,'TFM_results','TFM_settings','-mat');
+        
+        msgbox('Calculation completed.');
+        %optional, if we want to pass data back after calculations
+        %guidata(hObject, handles);
 return;
-
+        
 
 % --- Executes on button press in show_vectors.
 function show_vectors_Callback(hObject, eventdata, handles)
-if handles.data.pos ~= 0
+if ~isempty(handles.data.pos)
     axes(handles.axes2);
-    cla; axis equal, hold on;  imagesc(handles.data.bild);
+    cla; axis equal; hold on;  
+    if ~isempty(handles.data.bild)
+        imagesc(handles.data.bild);
+    end
     if (get(hObject,'Value') == get(hObject,'Max'))
         quiver(handles.data.pos(:,1),handles.data.pos(:,2),handles.data.force(:,1),handles.data.force(:,2),2,'r');
     end
@@ -350,183 +430,179 @@ end
 
 % --- Executes on button press in preview.
 function preview_Callback(hObject, eventdata, handles)
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% Preview the Bayesian TFM results for individual frames
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+    %for the Bayesian method, we only assume z=0 for simplicity
+    handles.data.zdepth = 0.0;
     
-handles.data.zdepth = 0.0;    
-
-frame = get(handles.preview_frame,'value');
-
-if isempty(handles.data.displacement(frame).pos) || isempty(handles.data.displacement(frame).vec)||...
-length(handles.data.displacement(frame).pos) < 2
-     errordlg('The selected dataset is empty or not valid.','Error');
-     return;
-end
-
-bild_datei_index = get(handles.preview_image,'value');
-bild_dateien = get(handles.preview_image,'string');
-bild_datei = bild_dateien{bild_datei_index};
-
-%%% scale the Young modulus to 1
-ne = handles.data.young;
-young= 1;
-
-[grid_mat,u, i_max,j_max] = interp_vec2grid(handles.data.displacement(frame).pos+...
-              handles.data.displacement(frame).vec, handles.data.displacement(frame).vec,handles.data.meshsize);
-
-  kx_vec = 2*pi/i_max/handles.data.meshsize.*[0:(i_max/2-1) (-i_max/2:-1)];
-  ky_vec = 2*pi/j_max/handles.data.meshsize.*[0:(j_max/2-1) (-j_max/2:-1)];
-  kx = repmat(kx_vec',1,j_max);
-  ky = repmat(ky_vec,i_max,1);
-    
-  kx(1,1) = 1;
-  ky(1,1) = 1;
-  k = sqrt(kx.^2+ky.^2);
-  
-  conf = 2.*(1+handles.data.poisson)./(young.*k.^3);
-  Ginv_xx = conf .* ((1-handles.data.poisson).*k.^2+handles.data.poisson.*ky.^2);
-  Ginv_xy = conf .* (-handles.data.poisson.*kx.*ky);
-  Ginv_yy = conf .* ((1-handles.data.poisson).*k.^2+handles.data.poisson.*kx.^2);
-
-  Ginv_xx(1,1) = 0;
-  Ginv_yy(1,1) = 0;
-  Ginv_xy(1,1) = 0;
-  
-  Ginv_xy(i_max/2+1,:) = 0;
-  Ginv_xy(:,j_max/2+1) = 0;
-  
-  G1 = reshape(Ginv_xx,[1,i_max*j_max]);
-  G2 = reshape(Ginv_yy,[1,i_max*j_max]);
-  X1 = reshape([G1; G2], [], 1)';
-  
-  G3 = reshape(Ginv_xy,[1,i_max*j_max]);
-  G4 = zeros(1, i_max*j_max); 
-  X2 = reshape([G4; G3], [], 1)';
-  X3 = X2(1,2:end);
-   
-  X4 = diag(X1);
-  X5 = diag(X3,1);
-  X6 = diag(X3,-1);
-  X=X4+X5+X6;
-  
-  Ftu(:,:,1) = fft2(u(:,:,1));
-  Ftu(:,:,2) = fft2(u(:,:,2));
-
-  fux1=reshape(Ftu(:,:,1),i_max*j_max,1);
-  fuy1=reshape(Ftu(:,:,2),i_max*j_max,1);
-
-  fuu(1:2:size(fux1)*2,1) = fux1;
-  fuu(2:2:size(fuy1)*2,1) = fuy1;
-  
-  blah = get(handles.noiseway, 'SelectedObject');
-  noise_way=get(blah,'String');
-  
-  switch noise_way
-    case 'Noise from input file'
-        size_noise = size(handles.data.noise);
-        if  size_noise(2) ==1               
-           errordlg('No noise from input file. Using manual noise selection','Error');
-           return;
-        end
-          using_noise = handles.data.noise(frame);
-      
-    case 'Manual noise selection' 
-        
-     bild_dateien_1 = get(handles.preview_image,'string');
-     frame1 = get(handles.preview_frame,'value');
-     setappdata(0,'frame1', frame1 );
-     setappdata(0,'bild_dateien_1', bild_dateien_1 );
-     Select_noise(handles.data)
-  
-     [xx,yy]=getline('closed');
-     
-     if isempty(xx) || isempty(yy)
-       errordlg('The selected noise is empty.','Error');
-       return;
-     end
-
-     delete(Select_noise(handles.data));
-     
-     nxx=size(xx);
-     if isempty(xx) || nxx(1)==2
-        errordlg('Noise does not select','Error');
+    %check if we have enough data in the dataset number
+    frame = get(handles.preview_frame,'value');
+    if ~handles.data.data_nonempty(frame,1)
+        errordlg('The dataset number refers to an empty or too small displacement field.','Error');
         return;
-     end
-      
-     indata = inpolygon(handles.data.displacement(frame).pos(:,1),handles.data.displacement(frame).pos(:,2),xx,yy);
-     using_noise.pos = handles.data.displacement(frame).pos(indata,:);
-     using_noise.vec = handles.data.displacement(frame).vec(indata,:);
-     
-  end
-  
-   clear XX;
-   clear yy;
-  
-  
-  noise_u(1:2:size(using_noise.vec,1)*2,1) = using_noise.vec(:,1);
-  noise_u(2:2:size(using_noise.vec,1)*2,1) = using_noise.vec(:,2);
-  beta = 1/var(noise_u);
+    end
 
-  please_wait;
- 
- [L evidencep evidence_one]= optimal_lambda(beta,fuu,Ftu(:,:,1),Ftu(:,:,2),...
-                             young,handles.data.poisson,handles.data.meshsize,i_max, j_max,X);
- 
- handles.data.evidencep=[];
- handles.data.evidence_one=[];
- handles.data.evidencep = evidencep;
- handles.data.evidence_one = evidence_one;
+    E_rescale = handles.data.young; % initial Young modulus
+    E = 1;    %%% scale the Young modulus to 1
+    Orig_pos = handles.data.displacement(frame).pos(:,1:2);  %% position of displacement
+    vec = handles.data.displacement(frame).vec(:,1:2);  %% value of displacement
+    meshsize = handles.data.meshsize;
+    s  =  handles.data.poisson;
+    grid_mat = [];
 
- handles.data.regparam=[];
- handles.data.regparam = L;
+    %construct Green's function and Fourier transform the displacements
+    [grid_mat,i_max,j_max, X,fuu,Ftux,Ftuy,~] = fourier_X_u(Orig_pos,vec, meshsize,E, s, grid_mat);
 
- [handles.data.pos,traction,traction_magnitude,f] = ...
-                           reg_fourier_TFM(grid_mat,u,young,handles.data.poisson, handles.data.pix_durch_my,...
-                           handles.data.zdepth, handles.data.meshsize, i_max,j_max, L);
+    %select source for noise data
+    blah = get(handles.noiseway, 'SelectedObject');
+    noise_way = get(blah,'Tag');
+    switch noise_way
+        case 'inputfile'
+              if ~isfield(handles.data,'noise') || isempty(handles.data.noise) || (frame > length(handles.data.noise)) ||  isempty(handles.data.noise(frame).vec) || size(handles.data.noise(frame).vec,2) < 2 || size(handles.data.noise(frame).vec,2) < 2
+                  errordlg(['Current dataset no. ', num2str(frame), ' contains no noise data. Use manual noise selection.'],'Error');
+                  return;
+              end
+              used_noise_sample = handles.data.noise(frame).vec(:,1:2);
 
- handles.data.bild = imread(fullfile(handles.data.imagedir_name, bild_datei));
+        case 'noisedraw'
 
- handles.data.force=ne.*traction;
- handles.data.f_mat=ne.*f;
+            bild_dateien_1 = get(handles.preview_image,'string');
+            bild_datei_index_1 = get(handles.preview_image,'value');
 
- axes(handles.axes1)
- cla;hold on;
- plot(handles.data.evidencep(1,:), handles.data.evidencep(2,:),'o');
- xlabel('\lambda_2E^2');
- ylabel('Log(Evidence)');
- plot(handles.data.regparam, handles.data.evidence_one,'r*','MarkerSize',10);
- ps_t=[handles.data.regparam handles.data.evidence_one];
- strValues = num2str(ps_t(1),'%.4f');
- text(ps_t(1), 1*ps_t(2),['\lambda_2E^2=', strValues],'FontSize',10,'VerticalAlignment','bottom');
- hold off;
+            % Transfer information to Select_noise.mat
+            setappdata(0,'frame_1', frame);
+            setappdata(0,'bild_datei_index_1', bild_datei_index_1 );
+            setappdata(0,'bild_dateien_1', bild_dateien_1 );
 
- axes(handles.axes2);
- cla; axis equal, hold on; colormap gray, imagesc(handles.data.bild);
- hilf = get(handles.show_vectors,'Value');
- if hilf
-    quiver(handles.data.pos(:,1),handles.data.pos(:,2),handles.data.force(:,1),handles.data.force(:,2),2,'r');
- end
- set(gca, 'DataAspectRatio', [1,1,50],'YDir','reverse','XTick',[],'YTick',[]),hold off;
+            Select_noise(handles.data)
 
- axes(handles.axes3);
- cla; hold on; colormap jet;
- fnorm = (handles.data.f_mat(:,:,2).^2 + handles.data.f_mat(:,:,1).^2).^0.5;
- surf(grid_mat(:,:,1), grid_mat(:,:,2),fnorm),view(0,90),shading interp, axis equal;
- set(gca, 'DataAspectRatio', [1,1,50],'YDir','reverse','XTick',[],'YTick',[]),hold off;
+            try
+                [xx,yy] = getline('closed');
+            catch
+                errordlg('The selected noise data is empty.','Error');
+                delete(Select_noise(handles.data));
+                return;
+            end
+            delete(Select_noise(handles.data)); %% delete the Select_noise GUI
+            
+            %check if ROI contains displacement noise information
+            if isempty(xx) || isempty(yy)
+                errordlg('The selected noise data is empty.','Error');
+                return;
+            end
+            indata = inpolygon(handles.data.displacement(frame).pos(:,1),handles.data.displacement(frame).pos(:,2),xx,yy);
+            if (length(xx)<3) || (nnz(indata) <2)
+                errordlg('The selected area contains to few displacements.','Error');
+                return;
+            end
 
- delete(please_wait);
+            %get the displacement data in the ROI
+            used_noise_sample = handles.data.displacement(frame).vec(indata,1:2);
+            
+            %%% save the polygonal area containing the noise data
+            handles.data.selected_region_with_noise_xy = [xx yy];
+            handles.data.selected_region_with_noise_frame = frame;
+    end
 
+    beta = 1/var(used_noise_sample(:));
+
+
+    % Main calculation starts here, show waitbar
+    wait_f = waitbar(0.5,'Please wait...');
+    %Calculate optimal regularization parameter L
+    [L evidencep evidence_one] = optimal_lambda(beta,fuu,Ftux,Ftuy,...
+        E,s,meshsize,i_max, j_max,X);
+    %Calculate tractions
+    [handles.data.pos,f_nm_2,traction_magnitude,f_n_m,~,~] = ...
+        reg_fourier_TFM(Ftux,Ftuy,L,E,s,meshsize,...
+        i_max,j_max, grid_mat,handles.data.pix_durch_my, handles.data.zdepth);
+    handles.data.force = E_rescale.*f_nm_2;
+    f_mat = E_rescale.*f_n_m;
+
+
+    % Show results on the GUI
+    %plot evidence curve
+    cla(handles.axes1,'reset');
+    axes(handles.axes1)
+    hold on;
+    plot(evidencep(1,:), evidencep(2,:),'o');
+    set(gca,'FontSize',9);
+    xlabel('\lambda_2E^2','FontSize',9);
+    ylabel('Log(Evidence)','FontSize',9);
+    plot(L, evidence_one,'r*','MarkerSize',10);
+    ps_t=[L evidence_one];
+    strValues = num2str(ps_t(1),'%.4f');
+    lamtexth =text(ps_t(1), 1*ps_t(2),['\lambda_2E^2=', strValues],'FontSize',9,'VerticalAlignment','bottom');
+    Txpos = get(lamtexth,'Extent');
+    ayLims = get(gca,'YLim');
+    if Txpos(2)+Txpos(4) >= ayLims(2)
+        set(gca,'YLim', [ayLims(1), Txpos(2)+Txpos(4)*1.5]);
+    end
+    hold off;
+
+    %Plot cel image and vectors
+    %first gather information from the GUI
+    bild_datei_index = get(handles.preview_image,'value');
+    bild_dateien = get(handles.preview_image,'string');
+    %If we do not get a cell array, we need to make one (eg if only one entry)
+    if ~isempty(bild_dateien) && ~iscellstr(bild_dateien)
+       bild_dateien =cellstr(bild_dateien);
+    end
+    no_image = false;
+    if ~isempty(bild_dateien) && (length(bild_dateien) >= bild_datei_index) && ~strcmp(bild_dateien{bild_datei_index},'No image available')
+        bild_datei = bild_dateien{bild_datei_index};
+        try
+            handles.data.bild = imread(fullfile(handles.data.imagedir_name, bild_datei));
+        catch
+            no_image = true;
+            handles.data.bild = [];
+        end
+    else
+            no_image = true;
+    end
+
+    %plot images and traction vectors
+    axes(handles.axes2);
+    cla; axis equal, colormap(gca,gray); hold on; 
+    if ~no_image 
+        imagesc(handles.data.bild);
+    end
+    hilf = get(handles.show_vectors,'Value');
+    if hilf
+        quiver(handles.data.pos(:,1),handles.data.pos(:,2),handles.data.force(:,1),handles.data.force(:,2),2,'r');
+    end
+    set(gca, 'DataAspectRatio', [1,1,50],'YDir','reverse','XTick',[],'YTick',[],'YColor','w','XColor','w'),hold off;
+
+    %plot the heatmap for visualizing traction magnitude
+    axes(handles.axes3);
+    colorbar off;
+    cla; hold on; colormap(gca,jet);
+    fnorm = (f_mat(:,:,2).^2 + f_mat(:,:,1).^2).^0.5;
+    surf(grid_mat(:,:,1), grid_mat(:,:,2),fnorm),view(0,90),shading interp, axis equal;
+    set(gca, 'DataAspectRatio', [1,1,50],'YDir','reverse','XTick',[],'YTick',[],'YColor','w','XColor','w');
+    hilf = get(handles.showColorbar,'Value');
+    if hilf
+        colorbar('location','East','YColor','w','XColor','w');
+    end
+    hold off;
+
+    %close waitbar
+    close(wait_f);
+
+    %pass variables back
 guidata(hObject, handles);
 
-
-
-function meshsize_win_Callback(hObject, eventdata, handles)
-written = str2double(get(hObject,'String'));
-if ~isnan(written) && written > 0
-    handles.data.meshsize = written;
-else
-    errordlg('The mesh size must be given as a positive number.','Error');
-    set(handles.meshsize_win,'String', num2str(handles.data.meshsize));
-end
-guidata(hObject, handles);
+    function meshsize_win_Callback(hObject, eventdata, handles)
+    written = str2double(get(hObject,'String'));
+    if ~isnan(written) && written > 0
+        handles.data.meshsize = written;
+    else
+        errordlg('The mesh size must be given as a positive number.','Error');
+        set(handles.meshsize_win,'String', num2str(handles.data.meshsize));
+    end
+    guidata(hObject, handles);
 
 
 
@@ -538,31 +614,29 @@ end
 
 
 
-% --- Executes on button press in Take_noise.
- function Take_noise_Callback(hObject, eventdata, handles)
-
- Select_noise(handles.data);   
+% --- Executes on button press in noisedraw.
+function noisedraw_Callback(hObject, eventdata, handles)
 
 
-% --- Executes on button press in noise_draw.
-function noise_draw_Callback(hObject, eventdata, handles)
-% hObject    handle to noise_draw (see GCBO)
+% --- Executes on button press in inputfile.
+function inputfile_Callback(hObject, eventdata, handles)
+% hObject    handle to inputfile (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
 
 
-% --- Executes on button press in noise_frame.
-function noise_frame_Callback(hObject, eventdata, handles)
-% hObject    handle to noise_frame (see GCBO)
+% --- Executes on button press in showColorbar.
+function showColorbar_Callback(hObject, eventdata, handles)
+% hObject    handle to showColorbar (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
 
-
-% --- Executes during object creation, after setting all properties.
-function noiseway_CreateFcn(hObject, eventdata, handles)
-% hObject    handle to noiseway (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    empty - handles not created until after all CreateFcns called
-
-
- 
+% Hint: get(hObject,'Value') returns toggle state of showColorbar
+axes(handles.axes3);
+if (get(hObject,'Value') == get(hObject,'Max'))
+    hold on;
+    colorbar('location','East','YColor','w','XColor','w');
+    hold off;
+else
+    colorbar off;
+end

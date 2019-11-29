@@ -59,28 +59,36 @@ end
 function Select_noise_OpeningFcn(hObject, eventdata, handles, varargin)
 handles.data = varargin{1};
 
-dir_struct = vertcat(dir(fullfile(handles.data.imagedir_name,'*.tif*')),dir(fullfile(handles.data.imagedir_name,'*.jpg*')));
-[sorted_names,sorted_index] = sortrows({dir_struct.name}');
+frame = getappdata(0,'frame_1');
+bild_datei_index = getappdata(0,'bild_datei_index_1');
+bild_dateien = getappdata(0,'bild_dateien_1');
 
-for i = 1:length(handles.data.displacement)
-    hilf_cell{i,1} = num2str(i);
+%If we do not get a cell array, we need to make one (eg if only one entry)
+if ~isempty(bild_dateien) && ~iscellstr(bild_dateien)
+    bild_dateien =cellstr(bild_dateien);
+end
+no_image = false;
+if ~isempty(bild_dateien) && (length(bild_dateien) >= bild_datei_index) && ~strcmp(bild_dateien{bild_datei_index},'No image available')
+    bild_datei = bild_dateien{bild_datei_index};
+    try
+        handles.data.bild = imread(fullfile(handles.data.imagedir_name, bild_datei));
+    catch
+        no_image = true;
+        handles.data.bild = [];
+    end
+else
+    no_image = true;
 end
 
-frame = getappdata(0,'frame1');
-bild_datei_index = frame;
-bild_dateien_1 = getappdata(0,'bild_dateien_1');
-bild_datei = bild_dateien_1{bild_datei_index};
-
-
-handles.data.bild = imread(fullfile(handles.data.imagedir_name, bild_datei));
-
 axes(handles.axes1);
-cla; axis equal, hold on; colormap gray, imagesc(handles.data.bild);
- quiver(handles.data.displacement(frame).pos(:,1),handles.data.displacement(frame).pos(:,2),...
-        handles.data.displacement(frame).vec(:,1),handles.data.displacement(frame).vec(:,2),'r');
+cla; axis equal, colormap(gca,gray); hold on;
+if ~no_image
+    imagesc(handles.data.bild);
+end
+quiver(handles.data.displacement(frame).pos(:,1),handles.data.displacement(frame).pos(:,2),...
+    handles.data.displacement(frame).vec(:,1),handles.data.displacement(frame).vec(:,2),'r');
 set(gca, 'DataAspectRatio', [1,1,50],'YDir','reverse','XTick',[],'YTick',[])
 hold off;
-
 
 handles.output = hObject;
 

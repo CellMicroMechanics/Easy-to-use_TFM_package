@@ -10,6 +10,25 @@
 % GNU General Public License along with this program.
 % If not, see <http://www.gnu.org/licenses/>.
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%DESCRIPTION
+%Function for the regularised mesh of displacement field
+
+%------------------
+%FUNCTION ARGUMENTS 
+%pos: postion of displacement
+%vec: value of displacement
+%cluster_size: grid spacing in pixels
+%grid_mat: old regular grid 
+%------------------
+
+%------------------
+%FUNCTION OUTPUTS
+%grid_mat: new regular grid with size i_max*j_max 
+%u: new regular displacement
+%i_max, j_max: sizes of grid
+%------------------
+
 function [grid_mat,u, i_max, j_max] = interp_vec2grid(pos, vec, cluster_size, grid_mat)
     if nargin == 3 || isempty(grid_mat)
         max_eck(1:2) = [max(pos(:,1)), max(pos(:,2))];

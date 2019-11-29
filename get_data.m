@@ -59,15 +59,18 @@ end
 % --- Executes just before get_data is made visible.
 function get_data_OpeningFcn(hObject, eventdata, handles, varargin)
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%   
+%%% Setting initial parameters
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
 handles.data.strain_noise_file_name = 0;
 handles.data.imagedir_name = 0;
-
-handles.data.young = 10000;
-handles.data.poisson = 0.5;
-handles.data.pix_durch_my = 0.067;
-handles.data.zdepth = 0.0;
+handles.data.young = 10000;   %% Young's modulus
+handles.data.poisson = 0.5;   %%  Poisson's ratio
+handles.data.pix_durch_my = 0.067;  %% size of one pixel in micrometer
+handles.data.zdepth = 0.0;    %% depth of focal plane below the surface
 handles.data.displacement = []; 
 handles.data.noise = []; 
+handles.data.data_nonempty = [];
 
 set(handles.figure1, 'units', 'normalized');
 
@@ -92,56 +95,101 @@ function varargout = get_data_OutputFcn(hObject, eventdata, handles)
 varargout{1} = handles.output;
 
 
-% --- Executes on button press in Continue.
+% --- Executes on pressing the button ''Continue''.
 function Continue_Callback(hObject, eventdata, handles)
 
-blah = get(handles.selectmethod, 'SelectedObject');
-method =get(blah,'String');
+%%check if all parameters are provided correctly
+if isnan(handles.data.young) || (handles.data.young< 0)
+        errordlg(' ''Young modulus'' must be a positive number.','Error');
+        return;
+end     
+if isnan(handles.data.pix_durch_my) || (handles.data.pix_durch_my<0)
+    errordlg(' ''Micrometer per pixel'' must be a positive number.','Error');
+    return;
+end
+if isnan(handles.data.poisson) || (handles.data.poisson<0) || (handles.data.poisson>0.5)
+    errordlg(' ''Poisson ratio'' must be in the range (0-0.5).','Error');
+    return;
+end
+if isnan(handles.data.zdepth) || (handles.data.zdepth<0)
+    errordlg(' ''Depth of z-plane'' should be a positive number (the distance between gel surface and measurement plane).','Error');
+    return;
+end
 
-if isempty(handles.data.strain_noise_file_name) || isequal(handles.data.strain_noise_file_name,0) || ...
-         isempty(handles.data.imagedir_name) || isequal(handles.data.imagedir_name,0)
-        errordlg('Some of the file/directory names have not been specified properly.','Error');
+%%check the existence for inpput_dat file and images folder 
+if isempty(handles.data.strain_noise_file_name) || isequal(handles.data.strain_noise_file_name,0) 
+        errordlg('Det data file has not been specified properly.','Error');
         return;
 end
 
-hilf  = load('-mat', handles.data.strain_noise_file_name);
-hilf_name = fieldnames(hilf);
+%%load file with displacements
+try
+    hilf  = load('-mat', handles.data.strain_noise_file_name);
+catch
+    errordlg('The displacement data must be provided as a Matlab file (.mat)','Error');
+    return;    
+end
 
+%%check for the correct file structure and transfer data 
+hilf_name = fieldnames(hilf);
 if isempty(hilf) || all(strcmp(hilf_name, 'input_data') == 0) 
-        errordlg('Specified file with displacement data does not contain data or is empty.','Error');
+        errordlg('The input file must contain a structure with the name ''input_data''.','Error');
         return;
 else
+    hilf_name = fieldnames(hilf.input_data);
+    if isempty(hilf) || all(strcmp(hilf_name, 'displacement') == 0) || isempty(hilf.input_data.displacement) || ~isstruct(hilf.input_data.displacement)
+            errordlg('The input file must contain a non-empty structure named ''input_data.displacement()''.','Error');
+            return;
+    end    
     hilf_name = fieldnames(hilf.input_data.displacement);
     if all(strcmp(hilf_name, 'pos') == 0) || all(strcmp(hilf_name, 'vec') == 0)
-        errordlg('Specified file with displacement data does not contain the fields .pos/.vec.','Error');
+        errordlg('The provided data structure does not contain the fields ''.pos()'' and ''.vec()''.','Error');
         return;
     else
         handles.data.displacement = hilf.input_data.displacement;
     end
-end
- 
- hilf_n  = load('-mat', handles.data.strain_noise_file_name);
- hilf_name_n = fieldnames(hilf_n);
 
-if isempty(hilf_n) || all(strcmp(hilf_name_n, 'input_data') == 0) 
-        errordlg('Specified file with noise data does not contain data or is empty.','Error');
-        return;
-else
- 
-     if isfield(hilf.input_data,'noise') == 0
-        handles.data.noise  = 1; 
+    if isfield(hilf.input_data,'noise') == 0 || ~isstruct(hilf.input_data.noise) || isempty(hilf.input_data.noise) 
+        handles.data.noise  = []; 
      else
- 
-     hilf_name_n = fieldnames(hilf.input_data.noise);
-       if all(strcmp(hilf_name_n, 'pos') == 0) || all(strcmp(hilf_name_n, 'vec') == 0)
-         errordlg('Specified file with noise data does not contain the fields .pos/.vec.','Error');
-       return;
+        hilf_name_n = fieldnames(hilf.input_data.noise);
+        if all(strcmp(hilf_name_n, 'pos') == 0) || all(strcmp(hilf_name_n, 'vec') == 0)
+            errordlg('Specified file with noise data does not contain the fields .pos/.vec.','Error');
+            return;
        else
-       handles.data.noise = hilf.input_data.noise;
+            handles.data.noise = hilf.input_data.noise;
        end
-     end  
+     end
 end
- 
+
+%identify the data sets that contain displacement data
+%This information is stored in a variable called 'data_nonempty'
+framenumber = length(handles.data.displacement);
+data_nonempty = false(framenumber,1);
+for i= 1: framenumber
+    size_pos = size(handles.data.displacement(i).pos);
+    size_vec = size(handles.data.displacement(i).vec);
+    
+    if size_pos(1) > 1 && size_pos(2) >= 2 && size_vec(1)>1  && size_vec(2) >= 2 
+       data_nonempty(i,1) = true;
+    else 
+       data_nonempty(i,1) = false ;  
+    end 
+end
+handles.data.data_nonempty = [data_nonempty  (1: framenumber)']; 
+
+%check all displacement datasets to see if there is any data
+data_nonempty =  handles.data.data_nonempty;
+first_index = find(data_nonempty(:,1),1);
+if isempty(first_index)
+    errordlg('The dataset only contains only empty or too small dispacement fields.','Error');
+    return;
+end
+
+
+%select the next menu that will open now
+blah = get(handles.selectmethod, 'SelectedObject');
+method =get(blah,'String');
 switch method
     case 'Regularization'
           Regularization(handles.data);
@@ -176,12 +224,7 @@ function radiobutton9_Callback(hObject, eventdata, handles)
 
 function young_win_Callback(hObject, eventdata, handles)
 written = str2double(get(hObject,'String'));
-if ~isnan(written) && written > 0
-    handles.data.young = written*1000;
-else
-    errordlg('The young modulus must be given as a positive number.','Error');
-    set(handles.young_win,'String', num2str(handles.data.young/1000));
-end
+handles.data.young = written*1000;
 guidata(hObject, handles);
 
 
@@ -200,12 +243,7 @@ end
 
 function poisson_win_Callback(hObject, eventdata, handles)
 written = str2double(get(hObject,'String'));
-if ~isnan(written) && written >= 0 && written <= 0.5
-    handles.data.poisson = written;
-else
-    errordlg('The poisson ratio must be between 0 and 0.5.','Error');
-    set(handles.poisson_win,'String', num2str(handles.data.poisson));
-end
+handles.data.poisson = written;
 guidata(hObject, handles);
 
 
@@ -224,12 +262,7 @@ end
 
 function pix_durch_my_win_Callback(hObject, eventdata, handles)
 written = str2double(get(hObject,'String'));
-if ~isnan(written) && written > 0
-    handles.data.pix_durch_my = written;
-else
-    errordlg('Please enter a positive number here.','Error');
-    set(handles.pix_durch_my_win,'String', num2str(handles.data.pix_durch_my));
-end
+handles.data.pix_durch_my = written;
 guidata(hObject, handles);
 
 % Hints: get(hObject,'String') returns contents of pix_durch_my_win as text
@@ -247,12 +280,7 @@ end
 
 function depth_in_substrate_win_Callback(hObject, eventdata, handles)
 written = str2double(get(hObject,'String'));
-if ~isnan(written) && written > 0
-    handles.data.zdepth = written;
-else
-    errordlg('Please enter a positive number or zero here.','Error');
-    set(handles.depth_in_substrate_win,'String', num2str(handles.data.zdepth));
-end
+handles.data.zdepth = written;
 guidata(hObject, handles);
 
 
@@ -270,8 +298,8 @@ end
 
 
 % --- Executes on button press in strain_noise_file_browse.
+%read the name of the file containing input data
 function strain_noise_file_browse_Callback(hObject, eventdata, handles)
-
 [filename, pathname] = uigetfile('*.mat', 'Select a .mat file');
 if ~isequal(filename,0)
     handles.data.strain_noise_file_name = fullfile(pathname, filename);
@@ -299,16 +327,15 @@ function noisefile_win_CreateFcn(hObject, eventdata, handles)
 % handles    empty - handles not created until after all CreateFcns called
 
 % --- Executes on button press in imagedir_browse.
+%Read the file names for the images
 function imagedir_browse_Callback(hObject, eventdata, handles)
 
 handles.data.imagedir_name = uigetdir('','Location of cell images');
 
-dir_struct = vertcat(dir(fullfile(handles.data.imagedir_name,'*.tif*')),dir(fullfile(handles.data.imagedir_name,'*.jpg*')));
-  if isempty(dir_struct) || all(strcmp(dir_struct.name))
-        errordlg('Specified file with cell images do not contain the fields .tif/.jpg.','Error');
-        return;
-  end 
-     
+%%%%%%%%%%%%%%%%%%% change
+% dir_struct = vertcat(dir(fullfile(handles.data.imagedir_name,'*.tif*')),dir(fullfile(handles.data.imagedir_name,'*.jpg*')));
+%%%%%%%%%%%%%%%%%%%
+
 if ~isequal(handles.data.imagedir_name,0)
     if size(handles.data.imagedir_name,2) > 55
         disp_string = ['... ',handles.data.imagedir_name(end-55:end)];
