@@ -332,10 +332,6 @@ function imagedir_browse_Callback(hObject, eventdata, handles)
 
 handles.data.imagedir_name = uigetdir('','Location of cell images');
 
-%%%%%%%%%%%%%%%%%%% change
-% dir_struct = vertcat(dir(fullfile(handles.data.imagedir_name,'*.tif*')),dir(fullfile(handles.data.imagedir_name,'*.jpg*')));
-%%%%%%%%%%%%%%%%%%%
-
 if ~isequal(handles.data.imagedir_name,0)
     if size(handles.data.imagedir_name,2) > 55
         disp_string = ['... ',handles.data.imagedir_name(end-55:end)];
