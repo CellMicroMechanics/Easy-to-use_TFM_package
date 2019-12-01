@@ -51,6 +51,9 @@ beta = 1/varnoise;
 
 %calculate with E=1 and rescale Young's modulus at the end
 %prepare Fourier-tranformed Green's function and displacement
+%NOTE: fourier_X_u shifts the positions of the displacement
+%vectors such that the tractions are displayed in the deformed frame
+%where the cell is localized
 [grid_mat,i_max,j_max, X,fuu,Ftux,Ftuy,u] = fourier_X_u(input_pos,input_vec, meshsize, 1, s,[]);
             
 %Calculate the optimal regularization parameter
@@ -82,8 +85,14 @@ hold off;
 %provide a regularization parameter
 regparam=140;
 
+%NOTE: first shift the positions of the displacement
+%vectors such that the tractions are displayed in the deformed frame
+%where the cell is localized
+shifted_pos = input_pos + input_vec;
+
 %interpolate data onto a regular rectangular grid
-[grid_mat,u, i_max,j_max] = interp_vec2grid(input_pos,input_vec,meshsize);
+[grid_mat,u, i_max,j_max] = interp_vec2grid(shifted_pos,input_vec,meshsize);
+
 %FFT of displacement field
 Ftu(:,:,1) = fft2(u(:,:,1));
 Ftu(:,:,2) = fft2(u(:,:,2));
